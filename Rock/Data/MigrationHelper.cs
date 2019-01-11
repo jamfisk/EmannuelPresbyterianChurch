@@ -2424,6 +2424,38 @@ BEGIN
         /// <param name="description">The description.</param>
         /// <param name="guid">The GUID.</param>
         /// <param name="isSystem">if set to <c>true</c> [is system].</param>
+        public void AddDefinedValue( string definedTypeGuid, string value, string description, string guid, bool isSystem, int order )
+        {
+            Migration.Sql( string.Format( @"
+
+                DECLARE @DefinedTypeId int
+                SET @DefinedTypeId = (SELECT [Id] FROM [DefinedType] WHERE [Guid] = '{0}')
+
+                INSERT INTO [DefinedValue] (
+                    [IsSystem],[DefinedTypeId],[Order],
+                    [Value],[Description],
+                    [Guid])
+                VALUES(
+                    {4}, @DefinedTypeId, {5},
+                    '{1}', '{2}',
+                    '{3}')",
+                    definedTypeGuid,
+                    value,
+                    description.Replace( "'", "''" ),
+                    guid,
+                    ( isSystem ? "1" : "0" ),
+                    order
+                    ) );
+        }
+
+        /// <summary>
+        /// Adds a new DefinedValue for the given DefinedType.
+        /// </summary>
+        /// <param name="definedTypeGuid">The defined type GUID.</param>
+        /// <param name="value">The value.</param>
+        /// <param name="description">The description.</param>
+        /// <param name="guid">The GUID.</param>
+        /// <param name="isSystem">if set to <c>true</c> [is system].</param>
         public void AddDefinedValue( string definedTypeGuid, string value, string description, string guid, bool isSystem = true )
         {
             Migration.Sql( string.Format( @"

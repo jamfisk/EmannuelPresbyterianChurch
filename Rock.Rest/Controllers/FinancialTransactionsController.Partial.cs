@@ -61,6 +61,34 @@ namespace Rock.Rest.Controllers
         }
 
         /// <summary>
+        /// 
+        /// </summary>
+        /// <param name="authorizedPersonAliasId"></param>
+        /// <param name="gatewayId"></param>
+        /// <param name="transactionDetails"></param>
+        /// <param name="financialPersonSavedAccountId"></param>
+        /// <param name="showAsAnonymous"></param>
+        /// <returns></returns>
+        [Authenticate, Secured]
+        [HttpPost]
+        [System.Web.Http.Route( "api/FinancialTransactions/Process" )]
+        public System.Net.Http.HttpResponseMessage ProcessTransaction( [FromBody]FinancialTransactionService.ProcessTransactionArgs processTransactionArgs )
+        {
+            var financialTransactionService = Service as FinancialTransactionService;
+
+            try
+            {
+                var transaction = financialTransactionService.ProcessTransaction( processTransactionArgs );
+                return ControllerContext.Request.CreateResponse( HttpStatusCode.Created, transaction.Id );
+            }
+            catch ( Exception e )
+            {
+                var response = ControllerContext.Request.CreateErrorResponse( HttpStatusCode.BadRequest, e.Message );
+                throw new HttpResponseException( response );
+            }
+        }
+
+        /// <summary>
         /// Process the Refund.
         /// </summary>
         /// <param name="transactionId">The transaction identifier.</param>
