@@ -63,29 +63,40 @@ namespace Rock.Rest.Controllers
         /// <summary>
         /// 
         /// </summary>
-        /// <param name="authorizedPersonAliasId"></param>
-        /// <param name="gatewayId"></param>
-        /// <param name="transactionDetails"></param>
-        /// <param name="financialPersonSavedAccountId"></param>
-        /// <param name="showAsAnonymous"></param>
+        /// <param name="automatedPaymentArgs"></param>
         /// <returns></returns>
         [Authenticate, Secured]
         [HttpPost]
         [System.Web.Http.Route( "api/FinancialTransactions/Process" )]
-        public System.Net.Http.HttpResponseMessage ProcessTransaction( [FromBody]FinancialTransactionService.ProcessTransactionArgs processTransactionArgs )
+        public HttpResponseMessage ProcessPayment( [FromBody]AutomatedPaymentArgs automatedPaymentArgs )
         {
-            var financialTransactionService = Service as FinancialTransactionService;
+            var errorMessage = string.Empty;
+            
+            var rockContext = new RockContext();
+            var automatedPaymentProcessor = new AutomatedPaymentProcessor( automatedPaymentArgs, rockContext );
 
-            try
+            if ( !automatedPaymentProcessor.ValidateArgs( out errorMessage ) )
             {
-                var transaction = financialTransactionService.ProcessTransaction( processTransactionArgs );
-                return ControllerContext.Request.CreateResponse( HttpStatusCode.Created, transaction.Id );
+                var errorResponse = ControllerContext.Request.CreateErrorResponse( HttpStatusCode.BadRequest, errorMessage );
+                throw new HttpResponseException( errorResponse );
             }
-            catch ( Exception e )
+
+            var transaction = automatedPaymentProcessor.ProcessCharge( out errorMessage );
+
+            if ( !string.IsNullOrEmpty( errorMessage ) )
             {
-                var response = ControllerContext.Request.CreateErrorResponse( HttpStatusCode.BadRequest, e.Message );
-                throw new HttpResponseException( response );
+                var errorResponse = ControllerContext.Request.CreateErrorResponse( HttpStatusCode.InternalServerError, errorMessage );
+                throw new HttpResponseException( errorResponse );
             }
+
+            if ( transaction == null )
+            {
+                var errorResponse = ControllerContext.Request.CreateErrorResponse( HttpStatusCode.InternalServerError, "No transaction was created" );
+                throw new HttpResponseException( errorResponse );
+            }
+
+            var response = ControllerContext.Request.CreateResponse( HttpStatusCode.Created, transaction.Id );
+            return response;
         }
 
         /// <summary>

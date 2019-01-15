@@ -1175,7 +1175,7 @@ TransactionAccountDetails: [
                 var gatewayComponent = gateway.GetGatewayComponent();
                 if ( gatewayComponent != null )
                 {
-                    var threeStepGateway = gatewayComponent as ThreeStepGatewayComponent;
+                    var threeStepGateway = gatewayComponent as IThreeStepGatewayComponent;
                     if ( threeStepGateway != null )
                     {
                         _using3StepGateway = true;
@@ -2339,7 +2339,7 @@ TransactionAccountDetails: [
 
             bool isACHTxn = hfPaymentTab.Value == "ACH";
             var financialGateway = isACHTxn ? _achGateway : _ccGateway;
-            var gateway = ( isACHTxn ? _achGatewayComponent : _ccGatewayComponent ) as ThreeStepGatewayComponent;
+            var gateway = ( isACHTxn ? _achGatewayComponent : _ccGatewayComponent ) as IThreeStepGatewayComponent;
 
             if ( gateway == null )
             {
@@ -2641,9 +2641,10 @@ TransactionAccountDetails: [
 
             bool isACHTxn = hfPaymentTab.Value == "ACH";
             var financialGateway = isACHTxn ? _achGateway : _ccGateway;
-            var gateway = ( isACHTxn ? _achGatewayComponent : _ccGatewayComponent ) as ThreeStepGatewayComponent;
+            var gateway = isACHTxn ? _achGatewayComponent : _ccGatewayComponent;
+            var threeStepGateway = gateway as IThreeStepGatewayComponent;
 
-            if ( gateway == null )
+            if ( threeStepGateway == null )
             {
                 errorMessage = "There was a problem creating the payment gateway information";
                 return false;
@@ -2706,7 +2707,7 @@ TransactionAccountDetails: [
             FinancialPaymentDetail paymentDetail = null;
             if ( schedule != null )
             {
-                var scheduledTransaction = gateway.AddScheduledPaymentStep3( financialGateway, resultQueryString, out errorMessage );
+                var scheduledTransaction = threeStepGateway.AddScheduledPaymentStep3( financialGateway, resultQueryString, out errorMessage );
                 if ( scheduledTransaction == null )
                 {
                     return false;
@@ -2717,7 +2718,7 @@ TransactionAccountDetails: [
             }
             else
             {
-                var transaction = gateway.ChargeStep3( financialGateway, resultQueryString, out errorMessage );
+                var transaction = threeStepGateway.ChargeStep3( financialGateway, resultQueryString, out errorMessage );
                 if ( transaction == null || !string.IsNullOrWhiteSpace( errorMessage ) )
                 {
                     return false;
