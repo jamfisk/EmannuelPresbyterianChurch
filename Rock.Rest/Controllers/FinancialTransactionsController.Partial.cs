@@ -75,7 +75,7 @@ namespace Rock.Rest.Controllers
             var rockContext = new RockContext();
             var automatedPaymentProcessor = new AutomatedPaymentProcessor( automatedPaymentArgs, rockContext );
 
-            if ( !automatedPaymentProcessor.ValidateArgs( out errorMessage ) )
+            if ( !automatedPaymentProcessor.AreArgsValid( out errorMessage ) || automatedPaymentProcessor.IsRepeatCharge( out errorMessage ) )
             {
                 var errorResponse = ControllerContext.Request.CreateErrorResponse( HttpStatusCode.BadRequest, errorMessage );
                 throw new HttpResponseException( errorResponse );

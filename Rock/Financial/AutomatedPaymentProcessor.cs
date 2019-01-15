@@ -41,6 +41,7 @@ namespace Rock.Financial
         private FinancialAccountService _financialAccountService;
         private FinancialPersonSavedAccountService _financialPersonSavedAccountService;
         private FinancialBatchService _financialBatchService;
+        private FinancialTransactionService _financialTransactionService;
 
         // Loaded entities
         private Person _authorizedPerson;
@@ -79,9 +80,49 @@ namespace Rock.Financial
             _financialAccountService = new FinancialAccountService( _rockContext );
             _financialPersonSavedAccountService = new FinancialPersonSavedAccountService( rockContext );
             _financialBatchService = new FinancialBatchService( rockContext );
+            _financialTransactionService = new FinancialTransactionService( _rockContext );
 
             _transactionGuid = Guid.NewGuid();
             _financialTransaction = null;
+        }
+
+        /// <summary>
+        /// Validates that the args do not seem to be a repeat charge on the same person in a short timeframe.
+        /// Entities are loaded from supplied IDs where applicable to ensure existance and a valid state.
+        /// </summary>
+        /// <param name="errorMessage">Will be set to empty string if charge does not seem repeated. Otherwise a message will be set indicating the problem.</param>
+        /// <returns>True if the charge is a repeat. False otherwise.</returns>
+        public bool IsRepeatCharge( out string errorMessage )
+        {
+            errorMessage = string.Empty;
+
+            LoadEntities();
+
+            if ( _automatedPaymentArgs.IgnoreRepeatChargeProtection )
+            {
+                return false;
+            }
+
+            var personAliasIds = _personAliasService.Queryable()
+                .AsNoTracking()
+                .Where( a => a.Person.GivingId == _authorizedPerson.GivingId )
+                .Select( a => a.Id )
+                .ToList();
+
+            var minDateTime = RockDateTime.Now.AddMinutes( -5 );
+            var repeatTransaction = _financialTransactionService.Queryable()
+                .AsNoTracking()
+                .Where( t => t.AuthorizedPersonAliasId.HasValue && personAliasIds.Contains( t.AuthorizedPersonAliasId.Value ) )
+                .Where( t => t.TransactionDateTime >= minDateTime )
+                .FirstOrDefault();
+
+            if ( repeatTransaction != null )
+            {
+                errorMessage = string.Format( "Found a likely repeat charge. Check transaction id: {0}. Use IgnoreRepeatChargeProtection option to disable this protection.", repeatTransaction.Id );
+                return true;
+            }
+
+            return false;
         }
 
         /// <summary>
@@ -89,7 +130,7 @@ namespace Rock.Financial
         /// </summary>
         /// <param name="errorMessage">Will be set to empty string if arguments are valid. Otherwise a message will be set indicating the problem.</param>
         /// <returns>True if the arguments are valid. False otherwise.</returns>
-        public bool ValidateArgs( out string errorMessage )
+        public bool AreArgsValid( out string errorMessage )
         {
             errorMessage = string.Empty;
 
@@ -212,7 +253,12 @@ namespace Rock.Financial
                 return null;
             }
 
-            if ( !ValidateArgs( out errorMessage ) )
+            if ( IsRepeatCharge( out errorMessage ) )
+            {
+                return null;
+            }
+
+            if ( !AreArgsValid( out errorMessage ) )
             {
                 return null;
             }
