@@ -25,6 +25,7 @@ using System.Web.Http.OData;
 using Rock;
 using Rock.BulkExport;
 using Rock.Data;
+using Rock.Financial;
 using Rock.Model;
 using Rock.Rest.Filters;
 using Rock.Security;
