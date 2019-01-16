@@ -59,13 +59,19 @@ namespace RockWeb.Blocks.Communication
         defaultValue: true,
         order: 4,
         key: "EnableSmsSend" )]
+    [IntegerField( name:"Show Conversations From Months Ago",
+        description:"Limits the conversations shown in the left pane to those of X months ago or newer. This does not affect the actual messages shown on the right.",
+        defaultValue: 6,
+        order: 5,
+        key: "ShowConversationsFromMonthsAgo")]
     [CodeEditorField( "Person Info Lava Template",
         description: "A Lava template to display person information about the selected Communication Recipient.",
+        defaultValue: "{{ Person.FullName }}",
         mode: CodeEditorMode.Lava,
         theme: CodeEditorTheme.Rock,
         height: 300,
         required: false,
-        order: 5,
+        order: 6,
         key: "PersonInfoLavaTemplate" )]
     //Start here to build the person description lit field after selecting recipient.
     public partial class SmsConversations : RockBlock
@@ -180,11 +186,13 @@ namespace RockWeb.Blocks.Communication
                 if ( LoadPhoneNumbers() )
                 {
                     nbNoNumbers.Visible = false;
+                    divMain.Visible = true;
                     LoadResponseListing();
                 }
                 else
                 {
                     nbNoNumbers.Visible = true;
+                    divMain.Visible = false;
                 }
             }
             else
@@ -205,10 +213,7 @@ namespace RockWeb.Blocks.Communication
         private bool LoadPhoneNumbers()
         {
             // First load up all of the available numbers
-            var smsNumbers = DefinedTypeCache.Get( Rock.SystemGuid.DefinedType.COMMUNICATION_SMS_FROM.AsGuid() )
-                .DefinedValues
-                .Where( v => v.GetAttributeValue( "EnableMobileConversations" ).AsBoolean( true ) == false )
-                ;//.ToList();// probably do this last, keep here for testing
+            var smsNumbers = DefinedTypeCache.Get( Rock.SystemGuid.DefinedType.COMMUNICATION_SMS_FROM.AsGuid() ).DefinedValues;
 
             var selectedNumberGuids = GetAttributeValue( "AllowedSMSNumbers" ).SplitDelimitedValues( true ).AsGuidList();
             if ( selectedNumberGuids.Any() )
@@ -233,17 +238,16 @@ namespace RockWeb.Blocks.Communication
                 ddlSmsNumbers.DataSource = smsNumbers.Select( v => new
                 {
                     v.Id,
-                    Description = string.IsNullOrWhiteSpace( v.Description ) ? v.Value : v.Description.Truncate( 100 ),
+                    Description = string.IsNullOrWhiteSpace( v.Description )
+                    ? PhoneNumber.FormattedNumber( "", v.Value.Replace("+", string.Empty) )
+                    : v.Description.LeftWithEllipsis( 25 ),
                 });
 
+                ddlSmsNumbers.Visible = smsNumbers.Count() > 0;
                 ddlSmsNumbers.DataValueField = "Id";
                 ddlSmsNumbers.DataTextField = "Description";
                 ddlSmsNumbers.DataBind();
-
-                lblSelectedSmsNumber.Text = "SMS Number: " + ddlSmsNumbers.SelectedItem.Text.Truncate(25);
-                lblSelectedSmsNumber.Visible = smsNumbers.Count() == 1;
-                ddlSmsNumbers.Visible = smsNumbers.Count() > 1;
-
+                
                 string keyPrefix = string.Format( "sms-conversations-{0}-", this.BlockId );
 
                 string smsNumberUserPref = this.GetUserPreference( keyPrefix + "smsNumber" ) ?? string.Empty;
@@ -284,15 +288,16 @@ namespace RockWeb.Blocks.Communication
                 var communicationResponseService = new CommunicationResponseService( rockContext );
 
                 DataSet responses = null;
+                int months = GetAttributeValue( "ShowConversationsFromMonthsAgo" ).AsInteger();
 
                 if ( tglShowRead.Checked )
                 {
-                    responses = communicationResponseService.GetCommunicationsAndResponseRecipients( smsPhoneDefinedValueId.Value );
+                    responses = communicationResponseService.GetCommunicationsAndResponseRecipients( smsPhoneDefinedValueId.Value, months );
                 }
                 else
                 {
                     // Since communications sent from Rock are always considered "Read" we don't need them included in the list if we are not showing "Read" messages.
-                    responses = communicationResponseService.GetResponseRecipients( smsPhoneDefinedValueId.Value, false );
+                    responses = communicationResponseService.GetResponseRecipients( smsPhoneDefinedValueId.Value, false, months );
                 }
 
                 var responseListItems = responses.Tables[0].AsEnumerable()
@@ -401,11 +406,6 @@ namespace RockWeb.Blocks.Communication
             {
                 // We don't have a person to do the lava merge so just display the formatted phone number
                 html = PhoneNumber.FormattedNumber( "", messageKey.Value ) + unknownPerson;
-                litSelectedRecipientDescription.Text = html;
-            }
-            else if ( lava.IsNullOrWhiteSpace() )
-            {
-                // We have a person but no lava to merge so display the name
                 litSelectedRecipientDescription.Text = html;
             }
             else
@@ -550,11 +550,13 @@ namespace RockWeb.Blocks.Communication
             if ( LoadPhoneNumbers() )
             {
                 nbNoNumbers.Visible = false;
+                divMain.Visible = true;
                 LoadResponseListing();
             }
             else
             {
                 nbNoNumbers.Visible = true;
+                divMain.Visible = false;
             }
         }
 

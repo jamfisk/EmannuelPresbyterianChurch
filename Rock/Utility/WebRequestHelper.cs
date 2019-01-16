@@ -23,6 +23,9 @@ using System.Web;
 
 namespace Rock.Utility
 {
+    /// <summary>
+    /// 
+    /// </summary>
     public static class WebRequestHelper
     {
 
@@ -39,6 +42,16 @@ namespace Rock.Utility
                 return forwardedHost;
             }
             return context.Request.Url.Host;
-        }        
+        }
+
+        /// <summary>
+        /// Get if connection is secure
+        /// </summary>
+        /// <param name="context">The HTTP Context.</param>
+        /// <returns></returns>
+        public static bool IsSecureConnection( HttpContext context )
+        {
+            return String.Equals( context.Request.ServerVariables["HTTP_X_FORWARDED_PROTO"], "https", StringComparison.OrdinalIgnoreCase ) || context.Request.IsSecureConnection;
+        }
     }
 }
