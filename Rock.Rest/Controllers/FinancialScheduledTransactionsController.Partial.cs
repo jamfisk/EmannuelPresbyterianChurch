@@ -82,14 +82,73 @@ namespace Rock.Rest.Controllers
         /// Process and charge an instance of the scheduled transaction.
         /// </summary>
         /// <param name="scheduledTransactionId">The scheduled transaction identifier.</param>
+        /// <param name="ignoreRepeatChargeProtection">If true, the payment will be charged even if there is a similar transaction for the same person within a short time period.</param>
+        /// <param name="ignoreScheduleFrequencyProtection">If true, the payment will be charged even if the schedule has already been processed accoring to it's frequency.</param>
         /// <returns></returns>
         /// <exception cref="HttpResponseException"></exception>
         [Authenticate, Secured]
         [HttpPost]
         [System.Web.Http.Route( "api/FinancialScheduledTransactions/Process/{scheduledTransactionId}" )]
-        public System.Net.Http.HttpResponseMessage ProcessPayment( int scheduledTransactionId )
+        public System.Net.Http.HttpResponseMessage ProcessPayment( int scheduledTransactionId, [FromUri]bool ignoreRepeatChargeProtection, [FromUri]bool ignoreScheduleFrequencyProtection )
         {
-            var response = ControllerContext.Request.CreateResponse( HttpStatusCode.NotImplemented );
+            var financialScheduledTransactionService = Service as FinancialScheduledTransactionService;
+            var financialScheduledTransaction = financialScheduledTransactionService.Get( scheduledTransactionId );
+
+            if ( financialScheduledTransaction == null )
+            {
+                var errorResponse = ControllerContext.Request.CreateErrorResponse( HttpStatusCode.NotFound, "The scheduledTransactionId did not resolve" );
+                throw new HttpResponseException( errorResponse );
+            }
+
+            if ( !financialScheduledTransaction.FinancialGatewayId.HasValue )
+            {
+                var errorResponse = ControllerContext.Request.CreateErrorResponse( HttpStatusCode.BadRequest, "The scheduled transaction does not have an assigned gateway ID" );
+                throw new HttpResponseException( errorResponse );
+            }
+
+            var details = financialScheduledTransaction.ScheduledTransactionDetails.Select( d =>
+                new AutomatedPaymentArgs.AutomatedPaymentDetailArgs {
+                    AccountId = d.AccountId,
+                    Amount = d.Amount
+                }
+            ).ToList();
+
+            var automatedPaymentArgs = new AutomatedPaymentArgs
+            {
+                ScheduledTransactionId = scheduledTransactionId,
+                AuthorizedPersonAliasId = financialScheduledTransaction.AuthorizedPersonAliasId,
+                AutomatedGatewayId = financialScheduledTransaction.FinancialGatewayId.Value,
+                AutomatedPaymentDetails = details                
+            };
+
+            var errorMessage = string.Empty;
+            var rockContext = Service.Context as RockContext;
+
+            var automatedPaymentProcessor = new AutomatedPaymentProcessor( automatedPaymentArgs, rockContext );
+
+            if ( !automatedPaymentProcessor.AreArgsValid( out errorMessage ) ||
+                automatedPaymentProcessor.IsRepeatCharge( out errorMessage ) ||
+                !automatedPaymentProcessor.IsAccordingToSchedule( out errorMessage ) )
+            {
+                var errorResponse = ControllerContext.Request.CreateErrorResponse( HttpStatusCode.BadRequest, errorMessage );
+                throw new HttpResponseException( errorResponse );
+            }
+
+            var transaction = automatedPaymentProcessor.ProcessCharge( out errorMessage );
+
+            if ( !string.IsNullOrEmpty( errorMessage ) )
+            {
+                var errorResponse = ControllerContext.Request.CreateErrorResponse( HttpStatusCode.InternalServerError, errorMessage );
+                throw new HttpResponseException( errorResponse );
+            }
+
+            if ( transaction == null )
+            {
+                var errorResponse = ControllerContext.Request.CreateErrorResponse( HttpStatusCode.InternalServerError, "No transaction was created" );
+                throw new HttpResponseException( errorResponse );
+            }
+
+            var response = ControllerContext.Request.CreateResponse( HttpStatusCode.Created, transaction.Id );
             return response;
         }
     }

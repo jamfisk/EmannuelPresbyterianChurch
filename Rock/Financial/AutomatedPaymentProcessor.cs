@@ -42,6 +42,7 @@ namespace Rock.Financial
         private FinancialPersonSavedAccountService _financialPersonSavedAccountService;
         private FinancialBatchService _financialBatchService;
         private FinancialTransactionService _financialTransactionService;
+        private FinancialScheduledTransactionService _financialScheduledTransactionService;
 
         // Loaded entities
         private Person _authorizedPerson;
@@ -52,6 +53,7 @@ namespace Rock.Financial
         private ReferencePaymentInfo _referencePaymentInfo;
         private DefinedValueCache _transactionType;
         private DefinedValueCache _financialSource;
+        private FinancialScheduledTransaction _financialScheduledTransaction;
 
         // Results
         private Guid _transactionGuid;
@@ -81,6 +83,7 @@ namespace Rock.Financial
             _financialPersonSavedAccountService = new FinancialPersonSavedAccountService( rockContext );
             _financialBatchService = new FinancialBatchService( rockContext );
             _financialTransactionService = new FinancialTransactionService( _rockContext );
+            _financialScheduledTransactionService = new FinancialScheduledTransactionService( _rockContext );
 
             _transactionGuid = Guid.NewGuid();
             _financialTransaction = null;
@@ -96,12 +99,12 @@ namespace Rock.Financial
         {
             errorMessage = string.Empty;
 
-            LoadEntities();
-
             if ( _automatedPaymentArgs.IgnoreRepeatChargeProtection )
             {
                 return false;
             }
+
+            LoadEntities();
 
             var personAliasIds = _personAliasService.Queryable()
                 .AsNoTracking()
@@ -109,6 +112,7 @@ namespace Rock.Financial
                 .Select( a => a.Id )
                 .ToList();
 
+            // Check to see if a transaction exists for the person aliases within the last 5 minutes. This should help eliminate accidental repeat charges.
             var minDateTime = RockDateTime.Now.AddMinutes( -5 );
             var repeatTransaction = _financialTransactionService.Queryable()
                 .AsNoTracking()
@@ -123,6 +127,109 @@ namespace Rock.Financial
             }
 
             return false;
+        }
+
+        /// <summary>
+        /// Validates that the frequency of the scheduled transaction appears to be adhered to 
+        /// </summary>
+        /// <param name="errorMessage">Will be set to empty string if charge appears to follow the schedule frequency. Otherwise a message will be set indicating the problem.</param>
+        /// <returns>True if the charge appears to follow the schedule. False otherwise</returns>
+        public bool IsAccordingToSchedule( out string errorMessage )
+        {
+            errorMessage = string.Empty;
+
+            if ( _automatedPaymentArgs.IgnoreScheduleAdherenceProtection || !_automatedPaymentArgs.ScheduledTransactionId.HasValue )
+            {
+                return true;
+            }
+
+            LoadEntities();
+            var instructionsToIgnore = "Use IgnoreScheduleAdherenceProtection option to disable this protection.";
+
+            if ( _financialScheduledTransaction == null )
+            {
+                errorMessage = string.Format( "The scheduled transaction did not resolve. {0}", instructionsToIgnore );
+                return false;
+            }
+
+            // Allow a 1 day margin of error
+            var yesterday = RockDateTime.Now.AddDays( -1 );
+
+            if ( _financialScheduledTransaction.StartDate < yesterday )
+            {
+                errorMessage = string.Format( "The schedule start date is in the future. {0}", instructionsToIgnore );
+                return false;
+            }
+
+            if ( yesterday > _financialScheduledTransaction.EndDate )
+            {
+                errorMessage = string.Format( "The schedule end date is in the past. {0}", instructionsToIgnore );
+                return false;
+            }
+
+            if ( _financialScheduledTransaction.NumberOfPayments.HasValue && _financialScheduledTransaction.Transactions.Count >= _financialScheduledTransaction.NumberOfPayments.Value )
+            {
+                errorMessage = string.Format( "The scheduled transaction already has the maximum number of occurence. {0}", instructionsToIgnore );
+                return false;
+            }
+
+            // The idea here is to provide protection but not be overly restrictive.
+            // Given requirement example: for a weekly schedule, check if there was a transaction in the last 3 days
+            // From that example I derived the 40% accuracy factor
+            var minDateTime = RockDateTime.Now;
+            var accuracyFactor = 0.4d;
+
+            // I used 28 for the number of days in a month to keep calculations simple since that is the smallest month
+            // I used AddDays since it accepts doubles
+            switch ( _financialScheduledTransaction.TransactionFrequencyValue.Guid.ToString() )
+            {
+                case SystemGuid.DefinedValue.TRANSACTION_FREQUENCY_ONE_TIME:
+                    minDateTime = DateTime.MinValue;
+                    break;
+                case SystemGuid.DefinedValue.TRANSACTION_FREQUENCY_WEEKLY:
+                    minDateTime = minDateTime.AddDays( -7 * accuracyFactor );
+                    break;
+                case SystemGuid.DefinedValue.TRANSACTION_FREQUENCY_BIWEEKLY:
+                case SystemGuid.DefinedValue.TRANSACTION_FREQUENCY_TWICEMONTHLY:
+                    minDateTime = minDateTime.AddDays( -14 * accuracyFactor );
+                    break;
+                case SystemGuid.DefinedValue.TRANSACTION_FREQUENCY_MONTHLY:
+                    minDateTime = minDateTime.AddDays( -1 * accuracyFactor );
+                    break;
+                case SystemGuid.DefinedValue.TRANSACTION_FREQUENCY_QUARTERLY:
+                    minDateTime = minDateTime.AddDays( -3 * 28 * accuracyFactor );
+                    break;
+                case SystemGuid.DefinedValue.TRANSACTION_FREQUENCY_TWICEYEARLY:
+                    minDateTime = minDateTime.AddDays( -6 * 28 * accuracyFactor );
+                    break;
+                case SystemGuid.DefinedValue.TRANSACTION_FREQUENCY_YEARLY:
+                    minDateTime = minDateTime.AddDays( -364 * accuracyFactor );
+                    break;
+                default:
+                    errorMessage = string.Format(
+                        "The scheduled transaction frequency ID is not valid: {0}. {1}",
+                        _financialScheduledTransaction.TransactionFrequencyValueId,
+                        instructionsToIgnore );
+                    return false;
+            }
+
+            var previousOccurrenceTransaction = _financialTransactionService.Queryable()
+                .AsNoTracking()
+                .Where( t => t.ScheduledTransactionId == _financialScheduledTransaction.Id )
+                .Where( t => t.TransactionDateTime.HasValue && t.TransactionDateTime.Value >= minDateTime )
+                .FirstOrDefault();
+
+            if ( previousOccurrenceTransaction != null )
+            {
+                errorMessage = string.Format(
+                    "The schedule seems to have already been processed for the given frequency on {0}. Check transaction ID: {1}. {2}",
+                    previousOccurrenceTransaction.TransactionDateTime.Value.ToShortDateString(),
+                    previousOccurrenceTransaction.Id,
+                    instructionsToIgnore );
+                return false;
+            }
+
+            return true;
         }
 
         /// <summary>
@@ -235,6 +342,12 @@ namespace Rock.Financial
                 return false;
             }
 
+            if ( _automatedPaymentArgs.ScheduledTransactionId.HasValue && _financialScheduledTransaction == null )
+            {
+                errorMessage = string.Format( "The scheduled transaction did not resolve" );
+                return false;
+            }
+
             return true;
         }
 
@@ -258,6 +371,11 @@ namespace Rock.Financial
                 return null;
             }
 
+            if ( !IsAccordingToSchedule( out errorMessage ) )
+            {
+                return null;
+            }
+
             if ( !AreArgsValid( out errorMessage ) )
             {
                 return null;
@@ -266,7 +384,7 @@ namespace Rock.Financial
             _referencePaymentInfo.Amount = _automatedPaymentArgs.AutomatedPaymentDetails.Sum( d => d.Amount );
             _referencePaymentInfo.Email = _authorizedPerson.Email;
 
-            _financialTransaction = (_automatedGatewayComponent as IAutomatedGatewayComponent).AutomatedCharge( _financialGateway, _referencePaymentInfo, out errorMessage );
+            _financialTransaction = ( _automatedGatewayComponent as IAutomatedGatewayComponent ).AutomatedCharge( _financialGateway, _referencePaymentInfo, out errorMessage );
 
             if ( !string.IsNullOrEmpty( errorMessage ) )
             {
@@ -290,6 +408,11 @@ namespace Rock.Financial
         /// </summary>
         private void LoadEntities()
         {
+            if ( _automatedPaymentArgs.ScheduledTransactionId.HasValue && _financialScheduledTransaction == null )
+            {
+                _financialScheduledTransaction = _financialScheduledTransactionService.Get( _automatedPaymentArgs.ScheduledTransactionId.Value );
+            }
+
             if ( _authorizedPerson == null )
             {
                 _authorizedPerson = _personAliasService.GetPersonNoTracking( _automatedPaymentArgs.AuthorizedPersonAliasId );
@@ -313,20 +436,30 @@ namespace Rock.Financial
 
             if ( _authorizedPerson != null && _financialPersonSavedAccount == null )
             {
+                // Pick the correct saved account based on args or default for the user
                 var savedAccountQry = _financialPersonSavedAccountService.GetByPersonId( _authorizedPerson.Id ).AsNoTracking();
 
                 if ( _automatedPaymentArgs.FinancialPersonSavedAccountId.HasValue )
                 {
+                    // If there is an indicated saved account to use, don't assume any other saved account even with a schedule
                     var savedAccountId = _automatedPaymentArgs.FinancialPersonSavedAccountId.Value;
                     _financialPersonSavedAccount = savedAccountQry.FirstOrDefault( sa => sa.Id == savedAccountId );
                 }
+                else if ( _financialScheduledTransaction != null )
+                {
+                    // If there is a schedule and no indicated saved account to use, use the payment info associated with the schedule
+                    _financialPersonSavedAccount = savedAccountQry
+                        .Where( sa => sa.FinancialPaymentDetailId == _financialScheduledTransaction.FinancialPaymentDetailId )
+                        .FirstOrDefault();
+                }
                 else
                 {
+                    // Use the default or first if no default
                     _financialPersonSavedAccount = savedAccountQry.FirstOrDefault( sa => sa.IsDefault ) ?? savedAccountQry.FirstOrDefault();
                 }
             }
 
-            if ( _financialPersonSavedAccount != null )
+            if ( _financialPersonSavedAccount != null && _referencePaymentInfo == null )
             {
                 _referencePaymentInfo = _financialPersonSavedAccount.GetReferencePayment();
             }
@@ -339,7 +472,7 @@ namespace Rock.Financial
             if ( _financialSource == null )
             {
                 _financialSource = DefinedValueCache.Get( _automatedPaymentArgs.FinancialSourceGuid ?? SystemGuid.DefinedValue.FINANCIAL_SOURCE_TYPE_WEBSITE.AsGuid() );
-            }
+            }            
         }
 
         /// <summary>
@@ -348,6 +481,7 @@ namespace Rock.Financial
         private void SaveTransaction()
         {
             _financialTransaction.Guid = _transactionGuid;
+            _financialTransaction.ScheduledTransactionId = _automatedPaymentArgs.ScheduledTransactionId;
             _financialTransaction.AuthorizedPersonAliasId = _authorizedPerson.PrimaryAliasId;
             _financialTransaction.ShowAsAnonymous = _automatedPaymentArgs.ShowAsAnonymous;
             _financialTransaction.TransactionDateTime = RockDateTime.Now;

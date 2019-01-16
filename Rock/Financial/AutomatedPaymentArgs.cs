@@ -25,6 +25,15 @@ namespace Rock.Financial
     public class AutomatedPaymentArgs
     {
         /// <summary>
+        /// Gets or sets the ScheduledTransactionId of the <see cref="Rock.Model.FinancialScheduledTransaction" /> that triggered
+        /// this transaction. If this was an ad-hoc/on demand transaction, this property will be null.
+        /// </summary>
+        /// <value>
+        /// A <see cref="System.Int32"/> representing the ScheduledTransactionId of the <see cref="Rock.Model.FinancialScheduledTransaction"/>
+        /// </value>
+        public int? ScheduledTransactionId { get; set; }
+
+        /// <summary>
         /// The alias id of the person associated with this financial transaction
         /// </summary>
         public int AuthorizedPersonAliasId { get; set; }
@@ -37,10 +46,12 @@ namespace Rock.Financial
         /// <summary>
         /// The details of the transaction. Details include financial account id and corresponding amount
         /// </summary>
-        public ICollection<AutomatedPaymentDetailArgs> AutomatedPaymentDetails { get; set; }
+        public List<AutomatedPaymentDetailArgs> AutomatedPaymentDetails { get; set; }
 
         /// <summary>
-        /// The saved account id associated with the given person. If null, the person's default payment method will be applied instead
+        /// The saved account id associated with the given person.
+        /// If null and a schedule ID is set, the schedule's associated payment method will be used.
+        /// If null and no schedule ID is set, the person's default or first payment method will be applied.
         /// </summary>
         public int? FinancialPersonSavedAccountId { get; set; }
 
@@ -69,6 +80,12 @@ namespace Rock.Financial
         /// Otherwise, the payment will not be charged if a smilar transaction within a short time period exists.
         /// </summary>
         public bool IgnoreRepeatChargeProtection { get; set; }
+
+        /// <summary>
+        /// If a scheduled transaction id is supplied and this is false, the payment will be validated to ensure adherence to
+        /// the frequency of the indicated schedule. If true, the payment will be charged without the protection.
+        /// </summary>
+        public bool IgnoreScheduleAdherenceProtection { get; internal set; }
 
         public class AutomatedPaymentDetailArgs
         {
