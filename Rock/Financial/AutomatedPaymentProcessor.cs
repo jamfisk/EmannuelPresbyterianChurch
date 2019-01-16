@@ -35,6 +35,8 @@ namespace Rock.Financial
         private RockContext _rockContext;
         private AutomatedPaymentArgs _automatedPaymentArgs;
         private int? _currentPersonAliasId;
+        private bool _ignoreRepeatChargeProtection;
+        private bool _ignoreScheduleAdherenceProtection;
 
         // Declared services
         private PersonAliasService _personAliasService;
@@ -62,25 +64,20 @@ namespace Rock.Financial
         private FinancialTransaction _financialTransaction;
 
         /// <summary>
-        /// Create a new payment processor to handle a single automated payment. A new RockContext will be created.
-        /// </summary>
-        /// <param name="currentPersonAliasId">The current user's person alias ID. Possibly the REST user.</param>
-        /// <param name="automatedPaymentArgs">The arguments describing how toi charge the payment and store the resulting transaction</param>
-        public AutomatedPaymentProcessor( int? currentPersonAliasId, AutomatedPaymentArgs automatedPaymentArgs ) : this( currentPersonAliasId, automatedPaymentArgs, null )
-        {
-        }
-
-        /// <summary>
         /// Create a new payment processor to handle a single automated payment.
         /// </summary>
         /// <param name="currentPersonAliasId">The current user's person alias ID. Possibly the REST user.</param>
         /// <param name="automatedPaymentArgs">The arguments describing how toi charge the payment and store the resulting transaction</param>
         /// <param name="rockContext">The context to use for loading and saving entities</param>
-        public AutomatedPaymentProcessor( int? currentPersonAliasId, AutomatedPaymentArgs automatedPaymentArgs, RockContext rockContext )
+        /// <param name="ignoreRepeatChargeProtection">If true, the payment will be charged even if there is a similar transaction for the same person within a short time period.</param>
+        /// <param name="ignoreScheduleAdherenceProtection">If true and a schedule is indicated in the args, the payment will be charged even if the schedule has already been processed accoring to it's frequency.</param>
+        public AutomatedPaymentProcessor( int? currentPersonAliasId, AutomatedPaymentArgs automatedPaymentArgs, RockContext rockContext, bool ignoreRepeatChargeProtection, bool ignoreScheduleAdherenceProtection )
         {
-            _rockContext = rockContext ?? new RockContext();
+            _rockContext = rockContext;
             _automatedPaymentArgs = automatedPaymentArgs;
             _currentPersonAliasId = currentPersonAliasId;
+            _ignoreRepeatChargeProtection = ignoreRepeatChargeProtection;
+            _ignoreScheduleAdherenceProtection = ignoreScheduleAdherenceProtection;
 
             _personAliasService = new PersonAliasService( rockContext );
             _financialGatewayService = new FinancialGatewayService( rockContext );
@@ -104,7 +101,7 @@ namespace Rock.Financial
         {
             errorMessage = string.Empty;
 
-            if ( _automatedPaymentArgs.IgnoreRepeatChargeProtection )
+            if ( _ignoreRepeatChargeProtection )
             {
                 return false;
             }
@@ -143,7 +140,7 @@ namespace Rock.Financial
         {
             errorMessage = string.Empty;
 
-            if ( _automatedPaymentArgs.IgnoreScheduleAdherenceProtection || !_automatedPaymentArgs.ScheduledTransactionId.HasValue )
+            if ( _ignoreScheduleAdherenceProtection || !_automatedPaymentArgs.ScheduledTransactionId.HasValue )
             {
                 return true;
             }

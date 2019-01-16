@@ -75,18 +75,6 @@ namespace Rock.Financial
         /// </summary>
         public string BatchNamePrefix { get; set; }
 
-        /// <summary>
-        /// If true, the payment will be charged even if there is a similar transaction for the same person within a short time period.
-        /// Otherwise, the payment will not be charged if a smilar transaction within a short time period exists.
-        /// </summary>
-        public bool IgnoreRepeatChargeProtection { get; set; }
-
-        /// <summary>
-        /// If a scheduled transaction id is supplied and this is false, the payment will be validated to ensure adherence to
-        /// the frequency of the indicated schedule. If true, the payment will be charged without the protection.
-        /// </summary>
-        public bool IgnoreScheduleAdherenceProtection { get; set; }
-
         public class AutomatedPaymentDetailArgs
         {
             /// <summary>

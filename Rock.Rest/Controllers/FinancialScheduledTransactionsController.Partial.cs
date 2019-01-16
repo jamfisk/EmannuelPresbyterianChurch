@@ -83,8 +83,8 @@ namespace Rock.Rest.Controllers
         /// </summary>
         /// <param name="scheduledTransactionId">The scheduled transaction identifier.</param>
         /// <param name="ignoreRepeatChargeProtection">If true, the payment will be charged even if there is a similar transaction for the same person within a short time period.</param>
-        /// <param name="IgnoreScheduleAdherenceProtection">If true, the payment will be charged even if the schedule has already been processed accoring to it's frequency.</param>
-        /// <returns></returns>
+        /// <param name="ignoreScheduleAdherenceProtection">If true, the payment will be charged even if the schedule has already been processed accoring to it's frequency.</param>
+        /// <returns>The ID of the new transaction</returns>
         /// <exception cref="HttpResponseException"></exception>
         [Authenticate, Secured]
         [HttpPost]
@@ -122,15 +122,13 @@ namespace Rock.Rest.Controllers
                 ScheduledTransactionId = scheduledTransactionId,
                 AuthorizedPersonAliasId = financialScheduledTransaction.AuthorizedPersonAliasId,
                 AutomatedGatewayId = financialScheduledTransaction.FinancialGatewayId.Value,
-                AutomatedPaymentDetails = details,
-                IgnoreRepeatChargeProtection = ignoreRepeatChargeProtection,
-                IgnoreScheduleAdherenceProtection = ignoreScheduleAdherenceProtection
+                AutomatedPaymentDetails = details
             };
 
             var errorMessage = string.Empty;
             var rockContext = Service.Context as RockContext;
 
-            var automatedPaymentProcessor = new AutomatedPaymentProcessor( GetPersonAliasId( rockContext ), automatedPaymentArgs, rockContext );
+            var automatedPaymentProcessor = new AutomatedPaymentProcessor( GetPersonAliasId( rockContext ), automatedPaymentArgs, rockContext, ignoreRepeatChargeProtection, ignoreScheduleAdherenceProtection );
 
             if ( !automatedPaymentProcessor.AreArgsValid( out errorMessage ) ||
                 automatedPaymentProcessor.IsRepeatCharge( out errorMessage ) ||

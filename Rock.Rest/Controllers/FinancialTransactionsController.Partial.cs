@@ -61,19 +61,21 @@ namespace Rock.Rest.Controllers
         }
 
         /// <summary>
-        /// 
+        /// Process and charge a payment.
         /// </summary>
         /// <param name="automatedPaymentArgs"></param>
-        /// <returns></returns>
+        /// <param name="ignoreRepeatChargeProtection">If true, the payment will be charged even if there is a similar transaction for the same person within a short time period.</param>
+        /// <param name="ignoreScheduleAdherenceProtection">If true and a schedule ID is indicated in the args, the payment will be charged even if the schedule has already been processed accoring to it's frequency.</param>
+        /// <returns>The ID of the new transaction</returns>
         [Authenticate, Secured]
         [HttpPost]
         [System.Web.Http.Route( "api/FinancialTransactions/Process" )]
-        public HttpResponseMessage ProcessPayment( [FromBody]AutomatedPaymentArgs automatedPaymentArgs )
+        public HttpResponseMessage ProcessPayment( [FromBody]AutomatedPaymentArgs automatedPaymentArgs, [FromUri]bool ignoreRepeatChargeProtection, [FromUri]bool ignoreScheduleAdherenceProtection )
         {
             var errorMessage = string.Empty;
             
             var rockContext = Service.Context as RockContext;
-            var automatedPaymentProcessor = new AutomatedPaymentProcessor( GetPersonAliasId( rockContext ), automatedPaymentArgs, rockContext );
+            var automatedPaymentProcessor = new AutomatedPaymentProcessor( GetPersonAliasId( rockContext ), automatedPaymentArgs, rockContext, ignoreRepeatChargeProtection, ignoreScheduleAdherenceProtection );
 
             if ( !automatedPaymentProcessor.AreArgsValid( out errorMessage ) ||
                 automatedPaymentProcessor.IsRepeatCharge( out errorMessage ) ||
