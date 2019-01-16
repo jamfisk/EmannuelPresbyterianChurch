@@ -83,16 +83,19 @@ namespace Rock.Rest.Controllers
         /// </summary>
         /// <param name="scheduledTransactionId">The scheduled transaction identifier.</param>
         /// <param name="ignoreRepeatChargeProtection">If true, the payment will be charged even if there is a similar transaction for the same person within a short time period.</param>
-        /// <param name="ignoreScheduleFrequencyProtection">If true, the payment will be charged even if the schedule has already been processed accoring to it's frequency.</param>
+        /// <param name="IgnoreScheduleAdherenceProtection">If true, the payment will be charged even if the schedule has already been processed accoring to it's frequency.</param>
         /// <returns></returns>
         /// <exception cref="HttpResponseException"></exception>
         [Authenticate, Secured]
         [HttpPost]
         [System.Web.Http.Route( "api/FinancialScheduledTransactions/Process/{scheduledTransactionId}" )]
-        public System.Net.Http.HttpResponseMessage ProcessPayment( int scheduledTransactionId, [FromUri]bool ignoreRepeatChargeProtection, [FromUri]bool ignoreScheduleFrequencyProtection )
+        public System.Net.Http.HttpResponseMessage ProcessPayment( int scheduledTransactionId, [FromUri]bool ignoreRepeatChargeProtection, [FromUri]bool ignoreScheduleAdherenceProtection )
         {
             var financialScheduledTransactionService = Service as FinancialScheduledTransactionService;
-            var financialScheduledTransaction = financialScheduledTransactionService.Get( scheduledTransactionId );
+            var financialScheduledTransaction = financialScheduledTransactionService.Queryable()
+                .AsNoTracking()
+                .Include( s => s.ScheduledTransactionDetails )
+                .FirstOrDefault( t => t.Id == scheduledTransactionId );
 
             if ( financialScheduledTransaction == null )
             {
@@ -107,7 +110,8 @@ namespace Rock.Rest.Controllers
             }
 
             var details = financialScheduledTransaction.ScheduledTransactionDetails.Select( d =>
-                new AutomatedPaymentArgs.AutomatedPaymentDetailArgs {
+                new AutomatedPaymentArgs.AutomatedPaymentDetailArgs
+                {
                     AccountId = d.AccountId,
                     Amount = d.Amount
                 }
@@ -118,13 +122,15 @@ namespace Rock.Rest.Controllers
                 ScheduledTransactionId = scheduledTransactionId,
                 AuthorizedPersonAliasId = financialScheduledTransaction.AuthorizedPersonAliasId,
                 AutomatedGatewayId = financialScheduledTransaction.FinancialGatewayId.Value,
-                AutomatedPaymentDetails = details                
+                AutomatedPaymentDetails = details,
+                IgnoreRepeatChargeProtection = ignoreRepeatChargeProtection,
+                IgnoreScheduleAdherenceProtection = ignoreScheduleAdherenceProtection
             };
 
             var errorMessage = string.Empty;
             var rockContext = Service.Context as RockContext;
 
-            var automatedPaymentProcessor = new AutomatedPaymentProcessor( automatedPaymentArgs, rockContext );
+            var automatedPaymentProcessor = new AutomatedPaymentProcessor( GetPersonAliasId( rockContext ), automatedPaymentArgs, rockContext );
 
             if ( !automatedPaymentProcessor.AreArgsValid( out errorMessage ) ||
                 automatedPaymentProcessor.IsRepeatCharge( out errorMessage ) ||

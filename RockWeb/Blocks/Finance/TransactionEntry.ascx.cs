@@ -1200,6 +1200,7 @@ TransactionAccountDetails: [
                 // Get the saved accounts for the currently logged in user
                 var savedAccounts = new FinancialPersonSavedAccountService( rockContext )
                     .GetByPersonId( _targetPerson.Id )
+                    .Where( a => !a.IsSystem )
                     .ToList();
 
                 // Find the saved accounts that are valid for the selected CC gateway

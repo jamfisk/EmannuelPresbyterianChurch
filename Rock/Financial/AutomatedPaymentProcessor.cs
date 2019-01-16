@@ -34,6 +34,7 @@ namespace Rock.Financial
         // Constructor params
         private RockContext _rockContext;
         private AutomatedPaymentArgs _automatedPaymentArgs;
+        private int? _currentPersonAliasId;
 
         // Declared services
         private PersonAliasService _personAliasService;
@@ -54,6 +55,7 @@ namespace Rock.Financial
         private DefinedValueCache _transactionType;
         private DefinedValueCache _financialSource;
         private FinancialScheduledTransaction _financialScheduledTransaction;
+        private int? _currentNumberOfPaymentsForSchedule;
 
         // Results
         private Guid _transactionGuid;
@@ -62,20 +64,23 @@ namespace Rock.Financial
         /// <summary>
         /// Create a new payment processor to handle a single automated payment. A new RockContext will be created.
         /// </summary>
+        /// <param name="currentPersonAliasId">The current user's person alias ID. Possibly the REST user.</param>
         /// <param name="automatedPaymentArgs">The arguments describing how toi charge the payment and store the resulting transaction</param>
-        public AutomatedPaymentProcessor( AutomatedPaymentArgs automatedPaymentArgs ) : this( automatedPaymentArgs, null )
+        public AutomatedPaymentProcessor( int? currentPersonAliasId, AutomatedPaymentArgs automatedPaymentArgs ) : this( currentPersonAliasId, automatedPaymentArgs, null )
         {
         }
 
         /// <summary>
         /// Create a new payment processor to handle a single automated payment.
         /// </summary>
+        /// <param name="currentPersonAliasId">The current user's person alias ID. Possibly the REST user.</param>
         /// <param name="automatedPaymentArgs">The arguments describing how toi charge the payment and store the resulting transaction</param>
         /// <param name="rockContext">The context to use for loading and saving entities</param>
-        public AutomatedPaymentProcessor( AutomatedPaymentArgs automatedPaymentArgs, RockContext rockContext )
+        public AutomatedPaymentProcessor( int? currentPersonAliasId, AutomatedPaymentArgs automatedPaymentArgs, RockContext rockContext )
         {
             _rockContext = rockContext ?? new RockContext();
             _automatedPaymentArgs = automatedPaymentArgs;
+            _currentPersonAliasId = currentPersonAliasId;
 
             _personAliasService = new PersonAliasService( rockContext );
             _financialGatewayService = new FinancialGatewayService( rockContext );
@@ -161,16 +166,26 @@ namespace Rock.Financial
                 return false;
             }
 
-            if ( yesterday > _financialScheduledTransaction.EndDate )
+            if ( _financialScheduledTransaction.EndDate.HasValue && yesterday > _financialScheduledTransaction.EndDate )
             {
                 errorMessage = string.Format( "The schedule end date is in the past. {0}", instructionsToIgnore );
                 return false;
             }
 
-            if ( _financialScheduledTransaction.NumberOfPayments.HasValue && _financialScheduledTransaction.Transactions.Count >= _financialScheduledTransaction.NumberOfPayments.Value )
+            if ( _financialScheduledTransaction.NumberOfPayments.HasValue )
             {
-                errorMessage = string.Format( "The scheduled transaction already has the maximum number of occurence. {0}", instructionsToIgnore );
-                return false;
+                if ( !_currentNumberOfPaymentsForSchedule.HasValue )
+                {
+                    _currentNumberOfPaymentsForSchedule = _financialTransactionService.Queryable()
+                        .AsNoTracking()
+                        .Count( t => t.ScheduledTransactionId == _financialScheduledTransaction.Id );
+                }
+                
+                if ( _currentNumberOfPaymentsForSchedule.Value >= _financialScheduledTransaction.NumberOfPayments.Value )
+                {
+                    errorMessage = string.Format( "The scheduled transaction already has the maximum number of occurence. {0}", instructionsToIgnore );
+                    return false;
+                }
             }
 
             // The idea here is to provide protection but not be overly restrictive.
@@ -181,7 +196,7 @@ namespace Rock.Financial
 
             // I used 28 for the number of days in a month to keep calculations simple since that is the smallest month
             // I used AddDays since it accepts doubles
-            switch ( _financialScheduledTransaction.TransactionFrequencyValue.Guid.ToString() )
+            switch ( _financialScheduledTransaction.TransactionFrequencyValue.Guid.ToString().ToUpper() )
             {
                 case SystemGuid.DefinedValue.TRANSACTION_FREQUENCY_ONE_TIME:
                     minDateTime = DateTime.MinValue;
@@ -410,7 +425,10 @@ namespace Rock.Financial
         {
             if ( _automatedPaymentArgs.ScheduledTransactionId.HasValue && _financialScheduledTransaction == null )
             {
-                _financialScheduledTransaction = _financialScheduledTransactionService.Get( _automatedPaymentArgs.ScheduledTransactionId.Value );
+                _financialScheduledTransaction = _financialScheduledTransactionService.Queryable()
+                    .AsNoTracking()
+                    .Include( s => s.TransactionFrequencyValue )
+                    .FirstOrDefault( s => s.Id == _automatedPaymentArgs.ScheduledTransactionId.Value );
             }
 
             if ( _authorizedPerson == null )
@@ -437,7 +455,10 @@ namespace Rock.Financial
             if ( _authorizedPerson != null && _financialPersonSavedAccount == null )
             {
                 // Pick the correct saved account based on args or default for the user
-                var savedAccountQry = _financialPersonSavedAccountService.GetByPersonId( _authorizedPerson.Id ).AsNoTracking();
+                var savedAccountQry = _financialPersonSavedAccountService
+                    .GetByPersonId( _authorizedPerson.Id )
+                    .AsNoTracking()
+                    .Include( sa => sa.FinancialPaymentDetail );
 
                 if ( _automatedPaymentArgs.FinancialPersonSavedAccountId.HasValue )
                 {
@@ -447,9 +468,12 @@ namespace Rock.Financial
                 }
                 else if ( _financialScheduledTransaction != null )
                 {
-                    // If there is a schedule and no indicated saved account to use, use the payment info associated with the schedule
+                    // If there is a schedule and no indicated saved account to use, use payment info associated with the schedule
                     _financialPersonSavedAccount = savedAccountQry
-                        .Where( sa => sa.FinancialPaymentDetailId == _financialScheduledTransaction.FinancialPaymentDetailId )
+                        .Where( sa =>
+                            ( sa.FinancialPaymentDetailId.HasValue && sa.FinancialPaymentDetailId == _financialScheduledTransaction.FinancialPaymentDetailId ) ||
+                            ( !string.IsNullOrEmpty( sa.TransactionCode ) && sa.TransactionCode == _financialScheduledTransaction.TransactionCode )
+                        )
                         .FirstOrDefault();
                 }
                 else
@@ -481,8 +505,9 @@ namespace Rock.Financial
         private void SaveTransaction()
         {
             _financialTransaction.Guid = _transactionGuid;
+            _financialTransaction.CreatedByPersonAliasId = _currentPersonAliasId;
             _financialTransaction.ScheduledTransactionId = _automatedPaymentArgs.ScheduledTransactionId;
-            _financialTransaction.AuthorizedPersonAliasId = _authorizedPerson.PrimaryAliasId;
+            _financialTransaction.AuthorizedPersonAliasId = _automatedPaymentArgs.AuthorizedPersonAliasId;
             _financialTransaction.ShowAsAnonymous = _automatedPaymentArgs.ShowAsAnonymous;
             _financialTransaction.TransactionDateTime = RockDateTime.Now;
             _financialTransaction.FinancialGatewayId = _financialGateway.Id;

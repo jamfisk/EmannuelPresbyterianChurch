@@ -85,7 +85,7 @@ namespace Rock.Financial
         /// If a scheduled transaction id is supplied and this is false, the payment will be validated to ensure adherence to
         /// the frequency of the indicated schedule. If true, the payment will be charged without the protection.
         /// </summary>
-        public bool IgnoreScheduleAdherenceProtection { get; internal set; }
+        public bool IgnoreScheduleAdherenceProtection { get; set; }
 
         public class AutomatedPaymentDetailArgs
         {

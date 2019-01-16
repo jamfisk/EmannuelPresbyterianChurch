@@ -73,7 +73,7 @@ namespace Rock.Rest.Controllers
             var errorMessage = string.Empty;
             
             var rockContext = Service.Context as RockContext;
-            var automatedPaymentProcessor = new AutomatedPaymentProcessor( automatedPaymentArgs, rockContext );
+            var automatedPaymentProcessor = new AutomatedPaymentProcessor( GetPersonAliasId( rockContext ), automatedPaymentArgs, rockContext );
 
             if ( !automatedPaymentProcessor.AreArgsValid( out errorMessage ) ||
                 automatedPaymentProcessor.IsRepeatCharge( out errorMessage ) ||
