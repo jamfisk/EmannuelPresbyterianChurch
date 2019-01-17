@@ -23,11 +23,13 @@
 
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Data.Entity;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Web.Http;
+using System.Web.Http.OData;
 using Rock;
 using Rock.Data;
 using Rock.Financial;
@@ -153,6 +155,58 @@ namespace Rock.Rest.Controllers
             }
 
             var response = ControllerContext.Request.CreateResponse( HttpStatusCode.Created, transaction.Id );
+            return response;
+        }
+
+        /// <summary>
+        /// Returns an object for every active schedule ordered by the schedule's ID.
+        /// Each object contains a Schedule and a MostRecentTransaction.
+        /// The schedule has the FinancialPaymentDetail and ScheduledTransactionDetails objects expanded.
+        /// </summary>
+        /// <param name="pageSize">The number of records to return for each page</param>
+        /// <param name="pageNumber">Zero-based page to return</param>
+        /// <returns></returns>
+        [Authenticate, Secured]
+        [HttpGet]
+        [System.Web.Http.Route( "api/FinancialScheduledTransactions/WithPreviousTransaction" )]
+        public System.Net.Http.HttpResponseMessage GetWithPreviousTransaction( [FromUri]int pageSize, [FromUri]int pageNumber )
+        {
+            var now = RockDateTime.Now;
+
+            // Get all the active schedules on the page (determined by params) ordered by ID
+            var schedules = Service.Queryable()
+                .AsNoTracking()
+                .Include( s => s.FinancialPaymentDetail )
+                .Include( s => s.ScheduledTransactionDetails )
+                .Where( s =>
+                    s.IsActive &&
+                    ( !s.NumberOfPayments.HasValue || s.Transactions.Count < s.NumberOfPayments ) &&
+                    ( !s.EndDate.HasValue || s.EndDate >= now ) &&
+                    s.StartDate <= now )
+                .OrderBy( s => s.Id )
+                .Skip( pageSize * pageNumber )
+                .Take( pageSize )
+                .ToList();
+
+            // Extract the schedule IDs for the most recent transaction query
+            var scheduleIds = schedules.Select( s => s.Id ).ToList();
+
+            // Get the most recent transactions for each schedule
+            var mostRecentTransactions = new FinancialTransactionService( Service.Context as RockContext ).Queryable()
+                .AsNoTracking()
+                .Where( t => t.ScheduledTransactionId.HasValue && scheduleIds.Contains( t.ScheduledTransactionId.Value ) )
+                .GroupBy( t => t.ScheduledTransactionId )
+                .Select( g => g.OrderByDescending( t => t.TransactionDateTime ).FirstOrDefault() )
+                .ToDictionary( t => t.ScheduledTransactionId.Value, t => t );
+
+            // Build an object for each schedule to return to the user  
+            var schedulesWithMostRecentTransaction = schedules.Select( s => new
+            {
+                Schedule = s,
+                MostRecentTransaction = mostRecentTransactions.GetValueOrDefault( s.Id )
+            } ).ToList();
+
+            var response = ControllerContext.Request.CreateResponse( HttpStatusCode.OK, schedulesWithMostRecentTransaction );
             return response;
         }
     }
